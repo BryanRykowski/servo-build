@@ -7,10 +7,14 @@ ARG SERVOBUILD_GID=1000
 RUN <<EOF
 groupadd -g "$SERVOBUILD_GID" -o "$UNAME"
 useradd -m -u "$SERVOBUILD_UID" -g "$SERVOBUILD_GID" -o "$UNAME"
+EOF
+USER $UNAME
+WORKDIR /home/$UNAME
+RUN <<EOF
 curl -LsSf https://astral.sh/uv/install.sh | sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh || exit -1
 chmod +x rustup.sh
 ./rustup.sh -y
 EOF
-ADD fedora_commands.sh commands.sh
-ENTRYPOINT ["sh", "commands.sh"]
+COPY --chown=$UNAME:$UNAME fedora_commands.sh /commands.sh
+ENTRYPOINT ["sh", "/commands.sh"]

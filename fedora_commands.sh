@@ -1,6 +1,5 @@
 #!/usr/bin/env sh
-su - "$UNAME"
-. /root/.local/bin/env
-. /root/.cargo/env
+. "/home/$UNAME/.cargo/env"
+. "/home/$UNAME/.local/bin/env"
 cd servo
 ./mach build "$SB_MACH_BUILD"
