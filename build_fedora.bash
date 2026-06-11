@@ -1,37 +1,96 @@
 #!/usr/bin/env bash
 
-SB_SRCDIR="./source/"
-SB_BUILDDIR="./servo/"
-SB_CONTAINER="servobuild-fedora"
-UNAME="servobuild"
+sb_srcdir="./source/"
+sb_builddir="./servo/"
+sb_container="servobuild-fedora"
+sb_user="servobuild"
 
-if [[ -z "$SB_WORKDIR"	]];then
-	SB_WORKDIR="$(dirname $(readlink -f $0))"
+while [[ "$#" -gt 0 ]]; do
+	if [[ "$1" == "--skip-app-build" ]]; then
+		sb_skip_app=1
+	elif [[ "$1" == "--rebuild-image" ]]; then
+		sb_rebuild_image=1
+	elif [[ "$1" == "--debug" ]]; then
+		sb_debug=1
+	elif [[ "$1" == "--clean-image" ]]; then
+		sb_clean_image=1
+	elif [[ "$1" == "--clean-all" ]]; then
+		sb_clean_image=1
+		sb_clean_dir=1
+	elif [[ "$1" == "--version" ]]; then
+		if [[ -z "$2" ]]; then
+			printf "[ERROR] --version needs a value\n"
+			exit -1
+		fi
+		shift
+		sb_version="$1"
+	else
+		printf "[ERROR] unrecognized arg $1\n"
+		exit -1
+	fi
+	shift
+done
+
+if [[ -z "$sb_workdir"	]];then
+	sb_workdir="$(dirname $(readlink -f $0))"
 fi
 
-if [[ -z "$SB_WORKDIR" ]]; then
-	echo "ERROR: \$WORKDIR not set"
+if [[ -z "$sb_workdir" ]]; then
+	echo "ERROR: \$sb_workdir not set"
 	exit -1
 fi
 
-if [[ ! -z "$SB_DEBUG" ]]; then
-	SB_MACH_BUILD="-d"
+if [[ -n "$sb_debug" ]]; then
+	sb_mach_build="--debug"
 else
-	SB_MACH_BUILD="-r"
+	sb_mach_build="--release"
+fi
+
+if [[ -z "$sb_version" ]]; then
+	sb_version="latest"
+fi
+
+if [[ -n "$sb_clean_image" ]]; then
+	docker image rm "$sb_container:$sb_version"
+fi
+
+if [[ -n "$sb_clean_dir" ]]; then
+	(
+		cd "$sb_workdir" || exit -1
+		rm -r "$sb_builddir" || exit -1
+		rm -rf "$sb_srcdir" || exit -1
+	) || exit -1
+fi
+
+if [[ -n "$sb_clean_image" || -n "$sb_clean_dir" ]]; then
+	exit 0
 fi
 
 (
-	cd "$SB_WORKDIR"
-	mkdir -p "$SB_BUILDDIR"
-	if [[ ! -d "$SB_SRCDIR" ]] || [[ ! "$(ls -A $SB_SRCDIR)" ]]; then
-		git clone --depth=1 "https://github.com/servo/servo.git" "$SB_SRCDIR"
+	cd "$sb_workdir" || exit -1
+	mkdir -p "$sb_builddir"
+	if [[ ! -d "$sb_srcdir" ]] || [[ ! "$(ls -A $sb_srcdir)" ]]; then
+		git clone --depth=1 "https://github.com/servo/servo.git" "$sb_srcdir"
 	fi
-	docker build --build-arg SERVOBUILD_UID="$(id -u)" --build-arg SERVOBUILD_GID="$(id -g)" --build-arg UNAME="$UNAME" -t "$SB_CONTAINER" -f fedora.dockerfile .
-	docker run --rm -e SB_MACH_BUILD="$SB_MACH_BUILD" -v "$SB_SRCDIR":"/home/$UNAME/servo:Z" "$SB_CONTAINER"
-	cp -r "${SB_SRCDIR}/resources" "$SB_BUILDDIR"
-	if [[ ! -z "$SB_DEBUG" ]]; then
-		cp "${SB_SRCDIR}/target/debug/servo" "$SB_BUILDDIR"
+	
+	if [[ -n "$sb_rebuild_image" && -n "$(docker images -q servobuild-fedora:$sb_version 2> /dev/null)" ]]; then
+		docker image rm "$sb_container:$sb_version"
+	fi
+
+	if [[ -z "$(docker images -q servobuild-fedora:$sb_version 2> /dev/null)" ]]; then
+		docker build --build-arg SERVOBUILD_UID="$(id -u)" --build-arg SERVOBUILD_GID="$(id -g)" --build-arg SB_USER="$sb_user" --build-arg sb_version="$sb_version" -t "$sb_container:$sb_version" -f fedora.dockerfile .
 	else
-		cp "${SB_SRCDIR}/target/release/servo" "$SB_BUILDDIR"
+		printf "skipping docker image build\n"
+	fi
+
+	if [[ -z "$sb_skip_app" ]]; then
+		docker run --rm -e SB_MACH_BUILD="$sb_mach_build" -v "$sb_srcdir":"/home/$sb_user/servo:Z" "$sb_container:$sb_version"
+	fi
+
+	cp -r "${sb_srcdir}/resources" "$sb_builddir"
+	if [[ ! -z "$SB_DEBUG" ]]; then
+		cp "${sb_srcdir}/target/debug/servoshell" "$sb_builddir"
+	else
+		cp "${sb_srcdir}/target/release/servoshell" "$sb_builddir"
 	fi
 ) || exit -1
